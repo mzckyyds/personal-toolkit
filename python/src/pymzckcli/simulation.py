@@ -39,7 +39,7 @@ def _version() -> str:
 def _sort_memories(
     memories: list[WorldMemory | CharacterMemory],
 ) -> list[WorldMemory | CharacterMemory]:
-    kind_order = {"OBSERVATION": 0, "INTENTION": 1, "ACTION": 2, "EVENT": 3}
+    kind_order = {"OBSERVATION": 0, "ACTION": 1, "EVENT": 2}
     return sorted(memories, key=lambda m: (m.ts, kind_order.get(m.kind, 99)))
 
 
@@ -96,17 +96,16 @@ class WorldMemory(BaseModel):
 
 
 class CharacterMemory(BaseModel):
-    """角色记忆, 记录角色的观察/意图/行动."""
+    """角色记忆, 记录角色的观察/行动."""
 
     ts: AwareDatetime = TimestampField
     owner: str = CharacterOwnerField
-    kind: Literal["OBSERVATION", "INTENTION", "ACTION"] = Field(
-        description="类型, 'OBSERVATION'/'INTENTION'/'ACTION' 分别表示观察/意图/行动.",
+    kind: Literal["OBSERVATION", "ACTION"] = Field(
+        description="类型, 'OBSERVATION'/'ACTION' 分别表示观察/行动.",
     )
     memory: str = Field(
         description="具体内容, 以角色第一人称视角记录, 如: "
         "'我看见了一个奇怪的物体', "
-        "'我决定离开这个地方', "
         "'我飞奔出去, 离开了这里'."
     )
 
@@ -498,15 +497,6 @@ class Simulation:  # noqa: D101
                         memory=o.observation,
                     )
                     for o in observations
-                ]
-                + [
-                    CharacterMemory(
-                        ts=ts,
-                        kind="INTENTION",
-                        owner=i.character,
-                        memory=i.intention,
-                    )
-                    for i in intentions
                 ]
                 + [
                     CharacterMemory(
