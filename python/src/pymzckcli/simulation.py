@@ -156,7 +156,6 @@ class CharacterState(BaseModel):
 class Observation(BaseModel):
     """角色观察."""
 
-    ts: AwareDatetime = TimestampField
     character: str = CharacterField
     observation: str = ObservationField
 
@@ -164,7 +163,6 @@ class Observation(BaseModel):
 class Intention(BaseModel):
     """角色意图."""
 
-    ts: AwareDatetime = TimestampField
     character: str = CharacterField
     intention: str = IntentionField
 
@@ -172,7 +170,6 @@ class Intention(BaseModel):
 class Action(BaseModel):
     """角色行动."""
 
-    ts: AwareDatetime = TimestampField
     character: str = CharacterField
     action: str = ActionField
 
@@ -182,16 +179,19 @@ class Action(BaseModel):
 # ======================================================================================
 @dataclass
 class IncomeDeps:  # noqa: D101
+    ts: AwareDatetime
     world: Path
 
 
 @dataclass
 class ObservationDeps:  # noqa: D101
+    ts: AwareDatetime
     world: Path
 
 
 @dataclass
 class IntentionDeps:  # noqa: D101
+    ts: AwareDatetime
     world: Path
     character: str
     observation: str
@@ -199,6 +199,7 @@ class IntentionDeps:  # noqa: D101
 
 @dataclass
 class ActionDeps:  # noqa: D101
+    ts: AwareDatetime
     world: Path
     observations: list[Observation]
     intentions: list[Intention]
@@ -206,6 +207,7 @@ class ActionDeps:  # noqa: D101
 
 @dataclass
 class OutcomeDeps:  # noqa: D101
+    ts: AwareDatetime
     world: Path
     observations: list[Observation]
     intentions: list[Intention]
@@ -217,13 +219,14 @@ Deps = IncomeDeps | ObservationDeps | IntentionDeps | ActionDeps | OutcomeDeps
 
 executor = Agent(
     model=OpenAIChatModel(
-        "deepseek-v4.1-flash",
+        os.environ.get("OEPNAI_LLM_NAME", ""),
         provider=OpenAIProvider(
-            base_url=os.environ.get("OPENAI_BASE_URL"),
-            api_key=os.environ.get("OPENAI_API_KEY"),
+            base_url=os.environ.get("OPENAI_BASE_URL", ""),
+            api_key=os.environ.get("OPENAI_API_KEY", ""),
         ),
     ),
     deps_type=Deps,
+    model_settings={"extra_body": {"thinking": {"type": "disabled"}}},
 )
 
 
@@ -249,7 +252,10 @@ def instructions(  # noqa: D103
             memory_segment.format(dump(Simulation.read_memories(world, "world")))
             + state_segment.format(dump(Simulation.read_states(world)))
             + role_segment.format("你是游戏主持人(GM), 负责推进世界时间线.")
-            + task_segment.format("阅读记忆与状态, 将时间线向前按需推进.")
+            + task_segment.format(
+                "阅读记忆与状态, 将时间线向前按需推进:\n"
+                f"\n<DATETIME>\n{deps.ts}\n</DATETIME>"
+            )
         )
 
     if isinstance(deps, ObservationDeps):
@@ -271,6 +277,7 @@ def instructions(  # noqa: D103
             + role_segment.format(f"我是 {character}, 以第一人称思考与行动.")
             + task_segment.format(
                 "我将基于当前观察给出我的意图:\n"
+                f"\n<DATETIME>\n{deps.ts}\n</DATETIME>\n"
                 f"\n<OBSERVATION>\n{dump(deps.observation)}\n</OBSERVATION>\n"
                 "\n<INTENTION>\n{intention}\n</INTENTION>\n"
                 "\nintention:\n"
@@ -284,6 +291,7 @@ def instructions(  # noqa: D103
             + role_segment.format("你是游戏主持人(GM), 负责裁决各角色的行动结果.")
             + task_segment.format(
                 "基于各角色的观察/意图, 裁决各角色的行动结果:\n"
+                f"\n<DATETIME>\n{deps.ts}\n</DATETIME>\n"
                 f"\n<OBSERVATIONS>\n{dump(deps.observations)}\n</OBSERVATIONS>\n"
                 f"\n<INTENTIONS>\n{dump(deps.intentions)}\n</INTENTIONS>\n"
                 "\n<ACTIONS>\n{actions}\n</ACTIONS>\n"
@@ -297,6 +305,7 @@ def instructions(  # noqa: D103
         + role_segment.format("你是游戏主持人(GM), 负责推进游戏.")
         + task_segment.format(
             "基于各角色的观察/意图/行动, 推进游戏:\n"
+            f"\n<DATETIME>\n{deps.ts}\n</DATETIME>\n"
             f"\n<OBSERVATIONS>\n{dump(deps.observations)}\n</OBSERVATIONS>\n"
             f"\n<INTENTIONS>\n{dump(deps.intentions)}\n</INTENTIONS>\n"
             f"\n<ACTIONS>\n{dump(deps.actions)}\n</ACTIONS>\n"
@@ -412,9 +421,15 @@ class Simulation:  # noqa: D101
             world = Path(tmp)
             shutil.copytree(self.latest_path, world, dirs_exist_ok=True)
 
+            # 获取当前世界状态的时间戳
+            ts = self.read_states(world, "world")[0].ts
+
             # INCOME 阶段, GM 推进时间线
             incomes = executor.run_sync(
-                deps=IncomeDeps(world=world),
+                deps=IncomeDeps(
+                    ts=ts,
+                    world=world,
+                ),
                 output_type=list[WorldMemory | WorldState | CharacterState],
             ).output
             self.update_world(
@@ -422,19 +437,25 @@ class Simulation:  # noqa: D101
                 updates=incomes,
             )
 
+            # 获取推进后的时间戳
+            ts = self.read_states(world, "world")[0].ts
+
             # OBSERVATION 阶段, GM 选择行动角色并为其生成观察信息
             observations = executor.run_sync(
-                deps=ObservationDeps(world=world),
+                deps=ObservationDeps(
+                    ts=ts,
+                    world=world,
+                ),
                 output_type=list[Observation],
             ).output
 
             # INTENTION 阶段, CHARACTER 根据观察信息产生行动意图
             intentions: list[Intention] = [
                 Intention(
-                    ts=observation.ts,
                     character=observation.character,
                     intention=executor.run_sync(
                         deps=IntentionDeps(
+                            ts=ts,
                             world=world,
                             character=observation.character,
                             observation=observation.observation,
@@ -448,6 +469,7 @@ class Simulation:  # noqa: D101
             # ACTION 阶段, GM 根据角色的行动意图生成实际行动
             actions: list[Action] = executor.run_sync(
                 deps=ActionDeps(
+                    ts=ts,
                     world=world,
                     observations=observations,
                     intentions=intentions,
@@ -458,6 +480,7 @@ class Simulation:  # noqa: D101
             # OUTCOME 阶段, GM 根据角色的观察/意图/实际行动生成裁决结果
             outcomes = executor.run_sync(
                 deps=OutcomeDeps(
+                    ts=ts,
                     world=world,
                     observations=observations,
                     intentions=intentions,
@@ -469,27 +492,27 @@ class Simulation:  # noqa: D101
                 world,
                 [
                     CharacterMemory(
+                        ts=ts,
                         kind="OBSERVATION",
                         owner=o.character,
-                        ts=o.ts,
                         memory=o.observation,
                     )
                     for o in observations
                 ]
                 + [
                     CharacterMemory(
+                        ts=ts,
                         kind="INTENTION",
                         owner=i.character,
-                        ts=i.ts,
                         memory=i.intention,
                     )
                     for i in intentions
                 ]
                 + [
                     CharacterMemory(
+                        ts=ts,
                         kind="ACTION",
                         owner=a.character,
-                        ts=a.ts,
                         memory=a.action,
                     )
                     for a in actions
