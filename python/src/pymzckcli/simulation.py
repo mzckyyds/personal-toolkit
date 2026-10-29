@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 import typer
 from dotenv import load_dotenv
-from pydantic import AwareDatetime, BaseModel, TypeAdapter, field_validator
+from pydantic import AwareDatetime, BaseModel, Field, TypeAdapter, field_validator
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -36,6 +36,13 @@ def _version() -> str:
     return f"ver_{time.time_ns() // 1_000_000}"
 
 
+def _sort_memories(
+    memories: list[WorldMemory | CharacterMemory],
+) -> list[WorldMemory | CharacterMemory]:
+    kind_order = {"OBSERVATION": 0, "INTENTION": 1, "ACTION": 2, "EVENT": 3}
+    return sorted(memories, key=lambda m: (m.ts, kind_order.get(m.kind, 99)))
+
+
 async def _request_hook(  # pyright: ignore[reportUnusedFunction]
     request: httpx2.Request,
 ) -> None:
@@ -49,27 +56,59 @@ async def _request_hook(  # pyright: ignore[reportUnusedFunction]
 
 
 # ======================================================================================
-# Memory
+# Data Model
 # ======================================================================================
-class BaseMemory(BaseModel):
-    """基础记忆."""
+TimestampField = Field(
+    description="时间戳, 带时区信息(默认东八区)的日期时间, ISO 8601 格式.",
+)
+WorldOwnerField = Field(
+    description="归属者, 固定为 'world', 表示属于世界.",
+)
+CharacterOwnerField = Field(
+    description="归属者, 不能为 'world', 表示属于指定角色.",
+)
+CharacterField = Field(
+    description="角色名.",
+)
+ObservationField = Field(
+    description="角色观察, 以角色第一人称视角记录, 如: '我看见了一个奇怪的物体'.",
+)
+IntentionField = Field(
+    description="角色意图, 以角色第一人称视角记录, 如: '我决定离开这个地方'.",
+)
+ActionField = Field(
+    description="角色行动, 以角色第一人称视角记录, 如: '我飞奔出去, 离开了这里'.",
+)
 
-    datetime: AwareDatetime
-    content: str
+
+class WorldMemory(BaseModel):
+    """世界记忆, 记录世界发生的事件."""
+
+    ts: AwareDatetime = TimestampField
+    owner: Literal["world"] = WorldOwnerField
+    kind: Literal["EVENT"] = Field(
+        default="EVENT",
+        description="类型, 固定为 'EVENT', 表示世界发生的事件.",
+    )
+    memory: str = Field(
+        description="具体内容, 涉及角色时用第三人称角色名来记录, 否则直接客观记录.",
+    )
 
 
-class WorldMemory(BaseMemory):
-    """世界记忆, 仅包含世界事件. content 需用角色名进行记录."""
+class CharacterMemory(BaseModel):
+    """角色记忆, 记录角色的观察/意图/行动."""
 
-    owner: Literal["world"]
-    kind: Literal["EVENT"]
-
-
-class CharacterMemory(BaseMemory):
-    """角色记忆, 包含角色的观察、行动或事件. content 需带入角色视角以第一人称记录."""
-
-    owner: str
-    kind: Literal["OBSERVE", "ACTION", "EVENT"]
+    ts: AwareDatetime = TimestampField
+    owner: str = CharacterOwnerField
+    kind: Literal["OBSERVATION", "INTENTION", "ACTION"] = Field(
+        description="类型, 'OBSERVATION'/'INTENTION'/'ACTION' 分别表示观察/意图/行动.",
+    )
+    memory: str = Field(
+        description="具体内容, 以角色第一人称视角记录, 如: "
+        "'我看见了一个奇怪的物体', "
+        "'我决定离开这个地方', "
+        "'我飞奔出去, 离开了这里'."
+    )
 
     @field_validator("owner")
     @classmethod
@@ -83,27 +122,24 @@ class CharacterMemory(BaseMemory):
         return v
 
 
-# ======================================================================================
-# State
-# ======================================================================================
-class BaseState(BaseModel):
-    """基础状态."""
-
-    datetime: AwareDatetime
-    description: str
-
-
-class WorldState(BaseState):
+class WorldState(BaseModel):
     """世界状态."""
 
-    owner: Literal["world"]
+    ts: AwareDatetime = TimestampField
+    owner: Literal["world"] = WorldOwnerField
+    state: str = Field(
+        description="世界状态的具体内容, 如世界的地理布局、天气状况、物资分布等.",
+    )
 
 
-class CharacterState(BaseState):
-    """角色状态. inventory 表示角色的物品栏, 记录角色所持物品及其数量和作用."""
+class CharacterState(BaseModel):
+    """角色状态."""
 
-    owner: str
-    inventory: str
+    ts: AwareDatetime = TimestampField
+    owner: str = CharacterOwnerField
+    state: str = Field(
+        description="角色状态的具体内容, 如角色的属性、能力、道具、装备等.",
+    )
 
     @field_validator("owner")
     @classmethod
@@ -117,48 +153,66 @@ class CharacterState(BaseState):
         return v
 
 
-# ======================================================================================
-# Observation & Action
-# ======================================================================================
 class Observation(BaseModel):
     """角色观察."""
 
-    character: str
-    observation: str
+    ts: AwareDatetime = TimestampField
+    character: str = CharacterField
+    observation: str = ObservationField
+
+
+class Intention(BaseModel):
+    """角色意图."""
+
+    ts: AwareDatetime = TimestampField
+    character: str = CharacterField
+    intention: str = IntentionField
 
 
 class Action(BaseModel):
     """角色行动."""
 
-    character: str
-    action: str
+    ts: AwareDatetime = TimestampField
+    character: str = CharacterField
+    action: str = ActionField
 
 
 # ======================================================================================
 # Executor
 # ======================================================================================
 @dataclass
-class InitDeps:  # noqa: D101
+class IncomeDeps:  # noqa: D101
     world: Path
 
 
 @dataclass
-class ObserveDeps:  # noqa: D101
+class ObservationDeps:  # noqa: D101
     world: Path
 
 
 @dataclass
-class ActDeps:  # noqa: D101
+class IntentionDeps:  # noqa: D101
     world: Path
     character: str
     observation: str
 
 
 @dataclass
-class JudgeDeps:  # noqa: D101
+class ActionDeps:  # noqa: D101
     world: Path
     observations: list[Observation]
+    intentions: list[Intention]
+
+
+@dataclass
+class OutcomeDeps:  # noqa: D101
+    world: Path
+    observations: list[Observation]
+    intentions: list[Intention]
     actions: list[Action]
+
+
+Deps = IncomeDeps | ObservationDeps | IntentionDeps | ActionDeps | OutcomeDeps
 
 
 executor = Agent(
@@ -169,13 +223,13 @@ executor = Agent(
             api_key=os.environ.get("OPENAI_API_KEY"),
         ),
     ),
-    deps_type=InitDeps | ObserveDeps | ActDeps | JudgeDeps,
+    deps_type=Deps,
 )
 
 
 @executor.instructions
 def instructions(  # noqa: D103
-    ctx: RunContext[InitDeps | ObserveDeps | ActDeps | JudgeDeps],
+    ctx: RunContext[Deps],
 ) -> str:
     def dump(obj: object) -> str:
         return json.dumps(
@@ -190,48 +244,62 @@ def instructions(  # noqa: D103
     deps = ctx.deps
     world = deps.world
 
-    if isinstance(deps, InitDeps):
+    if isinstance(deps, IncomeDeps):
         return (
-            memory_segment.format(dump(Simulation.read_memories(world)))
+            memory_segment.format(dump(Simulation.read_memories(world, "world")))
             + state_segment.format(dump(Simulation.read_states(world)))
             + role_segment.format("你是游戏主持人(GM), 负责推进世界时间线.")
             + task_segment.format("阅读记忆与状态, 将时间线向前按需推进.")
         )
 
-    if isinstance(deps, ObserveDeps):
+    if isinstance(deps, ObservationDeps):
         return (
-            memory_segment.format(dump(Simulation.read_memories(world)))
+            memory_segment.format(dump(Simulation.read_memories(world, "world")))
             + state_segment.format(dump(Simulation.read_states(world)))
             + role_segment.format("你是游戏主持人(GM), 负责挑选行动角色并生成观察.")
             + task_segment.format(
                 "基于当前记忆与状态, 选出适合推进剧情的角色, "
-                "为每个角色生成一段观察: 客观描述该角色当下能看到/听到/感受到的周边信息"
-                "(不使用任何人称), character 必须是记忆和状态中存在的角色."
+                "并以角色第一人称视角生成观察内容."
             )
         )
 
-    if isinstance(deps, ActDeps):
+    if isinstance(deps, IntentionDeps):
         character = deps.character
         return (
-            memory_segment.format(
-                dump(Simulation.read_memories(world, owner=character))
-            )
-            + state_segment.format(dump(Simulation.read_states(world, owner=character)))
-            + role_segment.format(f"你是角色 {character}, 以第一人称思考与行动.")
+            memory_segment.format(dump(Simulation.read_memories(world, character)))
+            + state_segment.format(dump(Simulation.read_states(world, character)))
+            + role_segment.format(f"我是 {character}, 以第一人称思考与行动.")
             + task_segment.format(
-                f"\n<OBSERVATION>\n{deps.observation}\n</OBSERVATION>\n"
-                "根据你的记忆/状态/观察, 描述你接下来的一条行动(做什么, 怎么做). "
+                "我将基于当前观察给出我的意图:\n"
+                f"\n<OBSERVATION>\n{dump(deps.observation)}\n</OBSERVATION>\n"
+                "\n<INTENTION>\n{intention}\n</INTENTION>\n"
+                "\nintention:\n"
+            )
+        )
+
+    if isinstance(deps, ActionDeps):
+        return (
+            memory_segment.format(dump(Simulation.read_memories(world, "world")))
+            + state_segment.format(dump(Simulation.read_states(world)))
+            + role_segment.format("你是游戏主持人(GM), 负责裁决各角色的行动结果.")
+            + task_segment.format(
+                "基于各角色的观察/意图, 裁决各角色的行动结果:\n"
+                f"\n<OBSERVATIONS>\n{dump(deps.observations)}\n</OBSERVATIONS>\n"
+                f"\n<INTENTIONS>\n{dump(deps.intentions)}\n</INTENTIONS>\n"
+                "\n<ACTIONS>\n{actions}\n</ACTIONS>\n"
+                "\nactions:\n"
             )
         )
 
     return (
-        memory_segment.format(dump(Simulation.read_memories(world)))
+        memory_segment.format(dump(Simulation.read_memories(world, "world")))
         + state_segment.format(dump(Simulation.read_states(world)))
-        + role_segment.format("你是游戏主持人(GM), 负责裁决角色行动.")
+        + role_segment.format("你是游戏主持人(GM), 负责推进游戏.")
         + task_segment.format(
+            "基于各角色的观察/意图/行动, 推进游戏:\n"
             f"\n<OBSERVATIONS>\n{dump(deps.observations)}\n</OBSERVATIONS>\n"
+            f"\n<INTENTIONS>\n{dump(deps.intentions)}\n</INTENTIONS>\n"
             f"\n<ACTIONS>\n{dump(deps.actions)}\n</ACTIONS>\n"
-            "对照各角色的观察与行动, 裁决行动是否成功及其后果."
         )
     )
 
@@ -279,10 +347,8 @@ class Simulation:  # noqa: D101
         ]
         if owner is not None:
             memories = [m for m in memories if m.owner == owner]
-            kind_order = {"OBSERVE": 0, "ACTION": 1, "EVENT": 2}
-            memories.sort(key=lambda m: (m.datetime, kind_order[m.kind]))
 
-        return memories
+        return _sort_memories(memories)
 
     @staticmethod
     def read_states(  # noqa: D102
@@ -311,9 +377,7 @@ class Simulation:  # noqa: D101
     ) -> None:
         memories = [u for u in updates if isinstance(u, (WorldMemory, CharacterMemory))]
         if len(memories) > 0:
-            memories = Simulation.read_memories(world) + memories
-            kind_order = {"OBSERVE": 0, "ACTION": 1, "EVENT": 2}
-            memories.sort(key=lambda m: (m.datetime, kind_order[m.kind]))
+            memories = _sort_memories(Simulation.read_memories(world) + memories)
             target = world / "memory.json"
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(
@@ -348,25 +412,29 @@ class Simulation:  # noqa: D101
             world = Path(tmp)
             shutil.copytree(self.latest_path, world, dirs_exist_ok=True)
 
-            # INIT 阶段, GM 推进时间线
-            init_result = executor.run_sync(
-                deps=InitDeps(world=world),
+            # INCOME 阶段, GM 推进时间线
+            incomes = executor.run_sync(
+                deps=IncomeDeps(world=world),
                 output_type=list[WorldMemory | WorldState | CharacterState],
             ).output
-            self.update_world(world, init_result)
+            self.update_world(
+                world=world,
+                updates=incomes,
+            )
 
-            # OBSERVE 阶段, GM 选择行动角色并生成其观察信息
-            observe_result = executor.run_sync(
-                deps=ObserveDeps(world=world),
+            # OBSERVATION 阶段, GM 选择行动角色并为其生成观察信息
+            observations = executor.run_sync(
+                deps=ObservationDeps(world=world),
                 output_type=list[Observation],
             ).output
 
-            # ACT 阶段, CHARACTER 根据观察信息生成行动
-            act_result: list[Action] = [
-                Action(
+            # INTENTION 阶段, CHARACTER 根据观察信息产生行动意图
+            intentions: list[Intention] = [
+                Intention(
+                    ts=observation.ts,
                     character=observation.character,
-                    action=executor.run_sync(
-                        deps=ActDeps(
+                    intention=executor.run_sync(
+                        deps=IntentionDeps(
                             world=world,
                             character=observation.character,
                             observation=observation.observation,
@@ -374,21 +442,60 @@ class Simulation:  # noqa: D101
                         output_type=str,
                     ).output,
                 )
-                for observation in observe_result
+                for observation in observations
             ]
 
-            # JUDGE 阶段, GM 裁决角色的行动
-            judge_result = executor.run_sync(
-                deps=JudgeDeps(
+            # ACTION 阶段, GM 根据角色的行动意图生成实际行动
+            actions: list[Action] = executor.run_sync(
+                deps=ActionDeps(
                     world=world,
-                    actions=act_result,
-                    observations=observe_result,
+                    observations=observations,
+                    intentions=intentions,
                 ),
-                output_type=list[
-                    WorldMemory | CharacterMemory | WorldState | CharacterState
-                ],
+                output_type=list[Action],
             ).output
-            self.update_world(world, judge_result)
+
+            # OUTCOME 阶段, GM 根据角色的观察/意图/实际行动生成裁决结果
+            outcomes = executor.run_sync(
+                deps=OutcomeDeps(
+                    world=world,
+                    observations=observations,
+                    intentions=intentions,
+                    actions=actions,
+                ),
+                output_type=list[WorldMemory | WorldState | CharacterState],
+            ).output
+            self.update_world(
+                world,
+                [
+                    CharacterMemory(
+                        kind="OBSERVATION",
+                        owner=o.character,
+                        ts=o.ts,
+                        memory=o.observation,
+                    )
+                    for o in observations
+                ]
+                + [
+                    CharacterMemory(
+                        kind="INTENTION",
+                        owner=i.character,
+                        ts=i.ts,
+                        memory=i.intention,
+                    )
+                    for i in intentions
+                ]
+                + [
+                    CharacterMemory(
+                        kind="ACTION",
+                        owner=a.character,
+                        ts=a.ts,
+                        memory=a.action,
+                    )
+                    for a in actions
+                ]
+                + outcomes,
+            )
 
             # 将裁决后的世界状态保存为新版本
             shutil.copytree(world, self.path / _version())
@@ -441,19 +548,14 @@ def demo(
         world=path / _version(),
         updates=[
             WorldState(
+                ts=(now := datetime.now(tz=UTC)),
                 owner="world",
-                datetime=(now := datetime.now(tz=UTC)),
-                description=(
-                    "清晨, 迷雾森林边缘的小村庄刚刚苏醒, 村民们开始了一天的劳作."
-                ),
+                state="清晨, 迷雾森林边缘的小村庄刚刚苏醒, 村民们开始了一天的劳作.",
             ),
             CharacterState(
+                ts=now,
                 owner="alice",
-                datetime=now,
-                description=(
-                    "Alice 是村庄的年轻草药师, 住在村口的小木屋里, 正准备外出采集草药."
-                ),
-                inventory="草药篮 x1, 银币 x10, 小刀 x1",
+                state="Alice 是村庄的年轻草药师, 住在村口的小木屋里, 正准备外出采药.",
             ),
         ],
     )
