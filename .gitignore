@@ -1,3 +1,4 @@
 .claude/
 .env
 skills-lock.json
+temp/
