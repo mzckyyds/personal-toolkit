@@ -1,11 +1,15 @@
 """Python CLI Toolkit."""
 
 import typer
+from dotenv import load_dotenv
 
 from .image import app as image_app
 from .simulation import app as simulation_app
 from .video import app as video_app
 from .voice import app as voice_app
+
+load_dotenv()
+
 
 app = typer.Typer(
     help="Python CLI Toolkit",

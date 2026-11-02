@@ -1,0 +1,15 @@
+<MEMORY>
+{memory}
+</MEMORY>
+
+<STATE>
+{state}
+</STATE>
+
+<OBSERVATION>
+{observation}
+</OBSERVATION>
+
+<TASK>
+我是 {character}, 我将基于当前观察信息, 以第一人称视角给出我的行动意图.
+</TASK>
