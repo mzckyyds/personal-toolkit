@@ -58,9 +58,12 @@ def _load_prompt(
 class Simulation:  # noqa: D101
     def __init__(  # noqa: D107
         self,
+        *,
         path: Path,
+        backstory: dict[str, str],
     ) -> None:
         self.path = path
+        self.backstory = backstory.copy()
         self.agent = Agent(
             model=OpenAIChatModel(
                 os.environ.get("OPENAI_LLM_NAME", ""),
@@ -72,16 +75,27 @@ class Simulation:  # noqa: D101
             model_settings={"extra_body": {"thinking": {"type": "disabled"}}},
         )
 
-    @staticmethod
+        self.path.mkdir(parents=True, exist_ok=True)
+        if not any(
+            child.is_dir() and re.fullmatch(r"ver_\d{13}", child.name)
+            for child in self.path.iterdir()
+        ):
+            (self.path / Simulation.create_version()).mkdir()
+
     def _format_world(
+        self,
+        *,
         world: Path,
     ) -> str:
-        states = Simulation.read_states(world, "world")
-        if len(states) != 1:
-            errmsg = f"Expected exactly one world state in {world}, got {len(states)}"
-            raise ValueError(errmsg)
-
         parts = ["<WORLD>"]
+
+        # Backstory for the world
+        if (backstory := self.backstory.get("world", "")) != "":
+            parts.append(f"<BACKSTORY>\n{escape(backstory, quote=False)}\n</BACKSTORY>")
+        else:
+            errmsg = "Missing backstory for 'world'"
+            raise ValueError(errmsg)
+        # Memories for the world
         if len(memories := Simulation.read_memories(world, "world")) > 0:
             parts.append(
                 "\n".join(
@@ -91,13 +105,19 @@ class Simulation:  # noqa: D101
                     for memory in memories
                 )
             )
-        parts.append(f"<STATE>\n{escape(states[0].state, quote=False)}\n</STATE>")
+        # States for the world
+        if len(states := Simulation.read_states(world, "world")) == 1:
+            parts.append(f"<STATE>\n{escape(states[0].state, quote=False)}\n</STATE>")
+        elif len(states) > 1:
+            errmsg = f"Expected one or zero world states in {world}, got {len(states)}"
+            raise ValueError(errmsg)
+
         parts.append("</WORLD>")
 
         return "\n".join(parts)
 
-    @staticmethod
     def _format_character(  # noqa: PLR0913
+        self,
         *,
         world: Path,
         name: str,
@@ -106,15 +126,15 @@ class Simulation:  # noqa: D101
         action: Action | None = None,
         with_memories: bool = False,
     ) -> str:
-        states = Simulation.read_states(world, name)
-        if len(states) != 1:
-            errmsg = (
-                f"Expected exactly one character state for {name} "
-                f"in {world}, got {len(states)}"
-            )
-            raise ValueError(errmsg)
-
         parts = [f'<CHARACTER name="{escape(name, quote=True)}">']
+
+        # Backstory for the character
+        if (backstory := self.backstory.get(name, "")) != "":
+            parts.append(f"<BACKSTORY>\n{escape(backstory, quote=False)}\n</BACKSTORY>")
+        else:
+            errmsg = f"Missing backstory for character {name!r}"
+            raise ValueError(errmsg)
+        # Memories for the character
         if with_memories:
             parts.extend(
                 f'<MEMORY timestamp="{escape(memory.ts.isoformat(), quote=True)}" '
@@ -122,7 +142,16 @@ class Simulation:  # noqa: D101
                 f"\n{escape(memory.memory, quote=False)}\n</MEMORY>"
                 for memory in Simulation.read_memories(world, name)
             )
-        parts.append(f"<STATE>\n{escape(states[0].state, quote=False)}\n</STATE>")
+        # States for the character
+        if len(states := Simulation.read_states(world, name)) == 1:
+            parts.append(f"<STATE>\n{escape(states[0].state, quote=False)}\n</STATE>")
+        elif len(states) > 1:
+            errmsg = (
+                f"Expected one or zero character states for {name} "
+                f"in {world}, got {len(states)}"
+            )
+            raise ValueError(errmsg)
+        # Observations, intentions, and actions for the character
         for tag, ts, text in (
             (
                 "OBSERVATION",
@@ -141,6 +170,7 @@ class Simulation:  # noqa: D101
                     f'<{tag} timestamp="{escape(ts.isoformat(), quote=True)}">'
                     f"\n{escape(text, quote=False)}\n</{tag}>"
                 )
+
         parts.append("</CHARACTER>")
 
         return "\n".join(parts)
@@ -248,7 +278,7 @@ class Simulation:  # noqa: D101
             world = Path(tmp)
             shutil.copytree(self.latest_path, world, dirs_exist_ok=True)
 
-            world_context = self._format_world(world)
+            world_context = self._format_world(world=world)
 
             # OBSERVATION 阶段, GM 选择角色并为其生成`观察信息`
             observations = self.agent.run_sync(
@@ -259,12 +289,10 @@ class Simulation:  # noqa: D101
                         [
                             self._format_character(
                                 world=world,
-                                name=path.stem,
+                                name=name,
                             )
-                            for path in (world / "state").iterdir()
-                            if path.is_file()
-                            and path.suffix == ".json"
-                            and path.name != "world.json"
+                            for name in self.backstory
+                            if name != "world"
                         ]
                     ),
                 ),
