@@ -42,10 +42,17 @@ def _sort_memories(
 
 def _load_prompt(
     tag: Literal["observation", "intention", "action", "outcome"],
+    **kwargs: str,
 ) -> str:
-    return (Path(__file__).parent / "prompt" / f"{tag}.prompt").read_text(
+    template = (Path(__file__).parent / "prompt" / f"{tag}.prompt").read_text(
         encoding="utf-8"
     )
+    prompt = template.format(**kwargs)
+
+    print("=" * 88)
+    print(prompt)
+
+    return prompt
 
 
 class Simulation:  # noqa: D101
@@ -94,9 +101,9 @@ class Simulation:  # noqa: D101
         *,
         world: Path,
         name: str,
-        observation: str | None = None,
-        intention: str | None = None,
-        action: str | None = None,
+        observation: Observation | None = None,
+        intention: Intention | None = None,
+        action: Action | None = None,
         with_memories: bool = False,
     ) -> str:
         states = Simulation.read_states(world, name)
@@ -116,13 +123,24 @@ class Simulation:  # noqa: D101
                 for memory in Simulation.read_memories(world, name)
             )
         parts.append(f"<STATE>\n{escape(states[0].state, quote=False)}\n</STATE>")
-        for tag, value in (
-            ("OBSERVATION", observation),
-            ("INTENTION", intention),
-            ("ACTION", action),
+        for tag, ts, text in (
+            (
+                "OBSERVATION",
+                observation and observation.ts,
+                observation and observation.observation,
+            ),
+            (
+                "INTENTION",
+                intention and intention.ts,
+                intention and intention.intention,
+            ),
+            ("ACTION", action and action.ts, action and action.action),
         ):
-            if value is not None:
-                parts.append(f"<{tag}>\n{escape(value, quote=False)}\n</{tag}>")
+            if ts is not None and text is not None:
+                parts.append(
+                    f'<{tag} timestamp="{escape(ts.isoformat(), quote=True)}">'
+                    f"\n{escape(text, quote=False)}\n</{tag}>"
+                )
         parts.append("</CHARACTER>")
 
         return "\n".join(parts)
@@ -234,7 +252,8 @@ class Simulation:  # noqa: D101
 
             # OBSERVATION 阶段, GM 选择角色并为其生成`观察信息`
             observations = self.agent.run_sync(
-                instructions=_load_prompt("observation").format(
+                instructions=_load_prompt(
+                    tag="observation",
                     world=world_context,
                     characters="\n".join(
                         [
@@ -258,13 +277,14 @@ class Simulation:  # noqa: D101
                     ts=observation.ts,
                     character=observation.character,
                     intention=self.agent.run_sync(
-                        instructions=_load_prompt("intention").format(
+                        instructions=_load_prompt(
+                            "intention",
                             character=self._format_character(
                                 world=world,
                                 name=observation.character,
-                                observation=observation.observation,
+                                observation=observation,
                                 with_memories=True,
-                            )
+                            ),
                         ),
                         output_type=str,
                     ).output,
@@ -274,17 +294,18 @@ class Simulation:  # noqa: D101
 
             # ACTION 阶段, GM 根据角色的`观察信息`/`行动意图`, 裁决其`实际行动`
             _intention_map = {
-                intention.character: intention.intention for intention in intentions
+                intention.character: intention for intention in intentions
             }
             actions: list[Action] = self.agent.run_sync(
-                instructions=_load_prompt("action").format(
+                instructions=_load_prompt(
+                    "action",
                     world=world_context,
                     characters="\n".join(
                         self._format_character(
                             world=world,
                             name=observation.character,
-                            observation=observation.observation,
-                            intention=_intention_map.get(observation.character, ""),
+                            observation=observation,
+                            intention=_intention_map.get(observation.character),
                         )
                         for observation in observations
                     ),
@@ -293,17 +314,18 @@ class Simulation:  # noqa: D101
             ).output
 
             # OUTCOME 阶段, GM 根据角色的`观察信息`/`行动意图`/`实际行动`, 推进游戏
-            _action_map = {action.character: action.action for action in actions}
+            _action_map = {action.character: action for action in actions}
             outcomes = self.agent.run_sync(
-                instructions=_load_prompt("outcome").format(
+                instructions=_load_prompt(
+                    "outcome",
                     world=world_context,
                     characters="\n".join(
                         self._format_character(
                             world=world,
                             name=observation.character,
-                            observation=observation.observation,
-                            intention=_intention_map.get(observation.character, ""),
-                            action=_action_map.get(observation.character, ""),
+                            observation=observation,
+                            intention=_intention_map.get(observation.character),
+                            action=_action_map.get(observation.character),
                         )
                         for observation in observations
                     ),
