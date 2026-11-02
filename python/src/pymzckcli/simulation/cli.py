@@ -45,7 +45,7 @@ PathField = Annotated[
     typer.Option(
         "--path",
         help="数据目录.",
-        exists=True,
+        exists=False,
         file_okay=False,
         dir_okay=True,
         readable=True,

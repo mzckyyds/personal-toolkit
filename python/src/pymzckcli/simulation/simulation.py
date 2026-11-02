@@ -80,7 +80,7 @@ class Simulation:  # noqa: D101
             child.is_dir() and re.fullmatch(r"ver_\d{13}", child.name)
             for child in self.path.iterdir()
         ):
-            (self.path / Simulation.create_version()).mkdir()
+            (self.path / Simulation.create_version() / "state").mkdir(parents=True)
 
     def _format_world(
         self,

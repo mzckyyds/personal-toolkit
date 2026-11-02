@@ -21,6 +21,7 @@ WorldOwnerField = Field(
     description="归属者, 固定为 'world', 表示属于世界.",
 )
 CharacterOwnerField = Field(
+    pattern=r"^[^/\\:\x00]+$",
     description="归属者, 不能为 'world', 表示属于指定角色.",
 )
 CharacterField = Field(
