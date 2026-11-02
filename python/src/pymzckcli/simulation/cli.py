@@ -8,6 +8,10 @@ import typer
 from .model import CharacterState, WorldState
 from .simulation import Simulation
 
+__all__ = [
+    "app",
+]
+
 # ======================================================================================
 # Fields
 # ======================================================================================

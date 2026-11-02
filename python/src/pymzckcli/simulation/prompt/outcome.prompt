@@ -1,22 +1,6 @@
-<MEMORY>
-{memory}
-</MEMORY>
+{world}
 
-<STATE>
-{state}
-</STATE>
-
-<OBSERVATIONS>
-{observations}
-</OBSERVATIONS>
-
-<INTENTIONS>
-{intentions}
-</INTENTIONS>
-
-<ACTIONS>
-{actions}
-</ACTIONS>
+{characters}
 
 <TASK>
 你是游戏主持人(GM), 基于各角色的观察信息/行动意图/实际行动, 推进游戏.

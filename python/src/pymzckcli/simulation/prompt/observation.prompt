@@ -1,10 +1,6 @@
-<MEMORY>
-{memory}
-</MEMORY>
+{world}
 
-<STATE>
-{state}
-</STATE>
+{characters}
 
 <TASK>
 你是游戏主持人(GM), 负责选择角色并为其生成观察信息.

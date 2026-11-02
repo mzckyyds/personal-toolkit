@@ -6,6 +6,7 @@ import re
 import shutil
 import tempfile
 import time
+from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -30,12 +31,6 @@ if TYPE_CHECKING:
 __all__ = [
     "Simulation",
 ]
-
-
-def _dump(obj: object) -> str:
-    return json.dumps(
-        obj, ensure_ascii=False, default=lambda o: o.model_dump(mode="json")
-    )
 
 
 def _sort_memories(
@@ -69,6 +64,68 @@ class Simulation:  # noqa: D101
             ),
             model_settings={"extra_body": {"thinking": {"type": "disabled"}}},
         )
+
+    @staticmethod
+    def _format_world(
+        world: Path,
+    ) -> str:
+        states = Simulation.read_states(world, "world")
+        if len(states) != 1:
+            errmsg = f"Expected exactly one world state in {world}, got {len(states)}"
+            raise ValueError(errmsg)
+
+        parts = ["<WORLD>"]
+        if len(memories := Simulation.read_memories(world, "world")) > 0:
+            parts.append(
+                "\n".join(
+                    f'<MEMORY timestamp="{escape(memory.ts.isoformat(), quote=True)}" '
+                    f'kind="{escape(memory.kind, quote=True)}">'
+                    f"\n{escape(memory.memory, quote=False)}\n</MEMORY>"
+                    for memory in memories
+                )
+            )
+        parts.append(f"<STATE>\n{escape(states[0].state, quote=False)}\n</STATE>")
+        parts.append("</WORLD>")
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def _format_character(  # noqa: PLR0913
+        *,
+        world: Path,
+        name: str,
+        observation: str | None = None,
+        intention: str | None = None,
+        action: str | None = None,
+        with_memories: bool = False,
+    ) -> str:
+        states = Simulation.read_states(world, name)
+        if len(states) != 1:
+            errmsg = (
+                f"Expected exactly one character state for {name} "
+                f"in {world}, got {len(states)}"
+            )
+            raise ValueError(errmsg)
+
+        parts = [f'<CHARACTER name="{escape(name, quote=True)}">']
+        if with_memories:
+            parts.extend(
+                f'<MEMORY timestamp="{escape(memory.ts.isoformat(), quote=True)}" '
+                f'kind="{escape(memory.kind, quote=True)}">'
+                f"\n{escape(memory.memory, quote=False)}\n</MEMORY>"
+                for memory in Simulation.read_memories(world, name)
+            )
+        parts.append(f"<STATE>\n{escape(states[0].state, quote=False)}\n</STATE>")
+        for tag, value in (
+            ("OBSERVATION", observation),
+            ("INTENTION", intention),
+            ("ACTION", action),
+        ):
+            if value is not None:
+                parts.append(f"<{tag}>\n{escape(value, quote=False)}\n</{tag}>")
+        parts.append("</CHARACTER>")
+
+        return "\n".join(parts)
 
     @property
     def latest_path(  # noqa: D102
@@ -173,14 +230,24 @@ class Simulation:  # noqa: D101
             world = Path(tmp)
             shutil.copytree(self.latest_path, world, dirs_exist_ok=True)
 
-            world_memory = _dump(self.read_memories(world, "world"))
-            world_state = _dump(self.read_states(world))
+            world_context = self._format_world(world)
 
             # OBSERVATION 阶段, GM 选择角色并为其生成`观察信息`
             observations = self.agent.run_sync(
                 instructions=_load_prompt("observation").format(
-                    memory=world_memory,
-                    state=world_state,
+                    world=world_context,
+                    characters="\n".join(
+                        [
+                            self._format_character(
+                                world=world,
+                                name=path.stem,
+                            )
+                            for path in (world / "state").iterdir()
+                            if path.is_file()
+                            and path.suffix == ".json"
+                            and path.name != "world.json"
+                        ]
+                    ),
                 ),
                 output_type=list[Observation],
             ).output
@@ -192,12 +259,12 @@ class Simulation:  # noqa: D101
                     character=observation.character,
                     intention=self.agent.run_sync(
                         instructions=_load_prompt("intention").format(
-                            memory=_dump(
-                                self.read_memories(world, observation.character)
-                            ),
-                            state=_dump(self.read_states(world, observation.character)),
-                            observation=_dump(observation.observation),
-                            character=observation.character,
+                            character=self._format_character(
+                                world=world,
+                                name=observation.character,
+                                observation=observation.observation,
+                                with_memories=True,
+                            )
                         ),
                         output_type=str,
                     ).output,
@@ -206,24 +273,40 @@ class Simulation:  # noqa: D101
             ]
 
             # ACTION 阶段, GM 根据角色的`观察信息`/`行动意图`, 裁决其`实际行动`
+            _intention_map = {
+                intention.character: intention.intention for intention in intentions
+            }
             actions: list[Action] = self.agent.run_sync(
                 instructions=_load_prompt("action").format(
-                    memory=world_memory,
-                    state=world_state,
-                    observations=_dump(observations),
-                    intentions=_dump(intentions),
+                    world=world_context,
+                    characters="\n".join(
+                        self._format_character(
+                            world=world,
+                            name=observation.character,
+                            observation=observation.observation,
+                            intention=_intention_map.get(observation.character, ""),
+                        )
+                        for observation in observations
+                    ),
                 ),
                 output_type=list[Action],
             ).output
 
             # OUTCOME 阶段, GM 根据角色的`观察信息`/`行动意图`/`实际行动`, 推进游戏
+            _action_map = {action.character: action.action for action in actions}
             outcomes = self.agent.run_sync(
                 instructions=_load_prompt("outcome").format(
-                    memory=world_memory,
-                    state=world_state,
-                    observations=_dump(observations),
-                    intentions=_dump(intentions),
-                    actions=_dump(actions),
+                    world=world_context,
+                    characters="\n".join(
+                        self._format_character(
+                            world=world,
+                            name=observation.character,
+                            observation=observation.observation,
+                            intention=_intention_map.get(observation.character, ""),
+                            action=_action_map.get(observation.character, ""),
+                        )
+                        for observation in observations
+                    ),
                 ),
                 output_type=list[WorldMemory | WorldState | CharacterState],
             ).output
