@@ -6,6 +6,7 @@ authors = [{ name = "mzckyyds", email = "1024418791@qq.com" }]
 requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.14.3",
+    "gdm-concordia>=2.4.0",
     "httpx2[socks]>=2.16.0",
     "pydantic>=2.13.5",
     "pydantic-ai-slim[openai]>=2.61.0",
