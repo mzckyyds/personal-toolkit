@@ -1,4 +1,4 @@
-"""视频生成命令行工具."""
+"""视频生成/超分命令行工具."""
 
 import typer
 
@@ -11,7 +11,7 @@ __all__ = [
 
 app = typer.Typer(
     name="video",
-    help="视频生成",
+    help="视频生成/超分",
     no_args_is_help=True,
 )
 

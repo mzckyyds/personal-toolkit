@@ -1,8 +1,10 @@
-"""优云智算 MiniMax H3 视频生成命令行工具.
+"""优云智算视频生成(MiniMax H3)与超分(Flash VSR)命令行工具.
 
 密钥使用环境变量 UCLOUD_API_KEY.
 
-reference: https://www.compshare.cn/docs/minimax-h3/api/minimax-h3-video-api
+reference:
+    https://www.compshare.cn/docs/minimax-h3/api/minimax-h3-video-api
+    https://www.compshare.cn/docs/modelverse/models/video_api/flash-vsr-video-upscaling-api
 """
 
 import base64
@@ -14,7 +16,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal, NamedTuple, cast
 
 import requests
 import typer
@@ -74,10 +76,39 @@ _DEFAULT_DURATION = 5
 _DEFAULT_RATIO = "16:9"
 _DEFAULT_PROMPT_TYPE = "text"
 
-# 视频生成相关路径
-_CREATE_PATH = "/minimax/v2/video_generation"
-_QUERY_TASK_PATH = "/minimax/v2/query/video_generation/{task_id}"
-_CANCEL_TASK_PATH = "/minimax/v2/video_generation/{task_id}"
+
+class _Endpoints(NamedTuple):
+    """异步任务类接口的创建/查询/取消路径, 查询与取消路径含 {task_id} 占位符."""
+
+    create: str
+    query: str
+    cancel: str
+
+
+# MiniMax H3 视频生成接口
+_GENERATION_ENDPOINTS = _Endpoints(
+    create="/minimax/v2/video_generation",
+    query="/minimax/v2/query/video_generation/{task_id}",
+    cancel="/minimax/v2/video_generation/{task_id}",
+)
+# Flash VSR 视频超分接口
+_UPSCALING_ENDPOINTS = _Endpoints(
+    create="/flashvsr/v1/video_upscaling",
+    query="/flashvsr/v1/query/video_upscaling/{task_id}",
+    cancel="/flashvsr/v1/video_upscaling/{task_id}",
+)
+
+# Flash VSR 参数
+_UPSCALING_MODEL = "FlashVSR"
+_DEFAULT_UPSCALING_RESOLUTION = "2K"
+_UPSCALING_VIDEO_MIME_TYPES = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".m4v": "video/x-m4v",
+    ".mkv": "video/x-matroska",
+    ".avi": "video/x-msvideo",
+}
+_MAX_UPSCALING_VIDEO_SIZE = 50 * 1024 * 1024
 
 
 # ======================================================================================
@@ -178,6 +209,17 @@ AigcWatermarkField = Annotated[
 BaseUrlField = Annotated[
     str,
     typer.Option(help="请求端点前缀."),
+]
+UpscaleVideoField = Annotated[
+    str,
+    typer.Option(
+        help="待超分的原视频, 支持公网 URL 或本地文件路径(本地文件自动转为 Data URL); "
+        "支持 MP4/MOV/M4V/MKV/AVI, 不超过 50 MiB."
+    ),
+]
+UpscaleResolutionField = Annotated[
+    Literal["720p", "1080p", "2K", "4K"],
+    typer.Option(help="目标分辨率档位, 需对原视频产生实际放大效果."),
 ]
 
 
@@ -321,18 +363,19 @@ def _create_task(
     *,
     base_url: str,
     api_key: str,
+    endpoints: _Endpoints,
     payload: dict[str, Any],
 ) -> str:
-    """创建视频生成任务, 返回 task_id."""
+    """创建异步任务, 返回 task_id."""
     logger.info(
-        "Creating video generation task: model=%r, resolution=%r, duration=%r",
+        "Creating task: model=%r, resolution=%r, duration=%r",
         payload.get("model"),
         payload.get("resolution"),
         payload.get("duration"),
     )
     resp = _api_request(
         method="POST",
-        url=f"{base_url}{_CREATE_PATH}",
+        url=f"{base_url}{endpoints.create}",
         api_key=api_key,
         json_payload=payload,
         extra_headers={"Idempotency-Key": uuid.uuid4().hex},
@@ -348,12 +391,13 @@ def _query_task(
     *,
     base_url: str,
     api_key: str,
+    endpoints: _Endpoints,
     task_id: str,
 ) -> dict[str, Any]:
     """查询单个任务, 返回 task 对象."""
     resp = _api_request(
         method="GET",
-        url=f"{base_url}{_QUERY_TASK_PATH.format(task_id=task_id)}",
+        url=f"{base_url}{endpoints.query.format(task_id=task_id)}",
         api_key=api_key,
     )
     task: Any = resp.get("task")
@@ -367,13 +411,14 @@ def _cancel_task(
     *,
     base_url: str,
     api_key: str,
+    endpoints: _Endpoints,
     task_id: str,
 ) -> None:
     """取消指定任务."""
     logger.warning("Cancelling task: task_id=%r", task_id)
     _api_request(
         method="DELETE",
-        url=f"{base_url}{_CANCEL_TASK_PATH.format(task_id=task_id)}",
+        url=f"{base_url}{endpoints.cancel.format(task_id=task_id)}",
         api_key=api_key,
     )
 
@@ -391,6 +436,7 @@ def _wait_task(
     *,
     base_url: str,
     api_key: str,
+    endpoints: _Endpoints,
     task_id: str,
     timeout: int,
 ) -> dict[str, Any]:
@@ -406,7 +452,12 @@ def _wait_task(
             return
         cancelled = True
         try:
-            _cancel_task(base_url=base_url, api_key=api_key, task_id=task_id)
+            _cancel_task(
+                base_url=base_url,
+                api_key=api_key,
+                endpoints=endpoints,
+                task_id=task_id,
+            )
         except Exception:
             logger.exception("Failed to cancel task: task_id=%r", task_id)
 
@@ -426,7 +477,12 @@ def _wait_task(
     try:
         deadline = time.monotonic() + timeout
         while True:
-            task = _query_task(base_url=base_url, api_key=api_key, task_id=task_id)
+            task = _query_task(
+                base_url=base_url,
+                api_key=api_key,
+                endpoints=endpoints,
+                task_id=task_id,
+            )
             status = task.get("status")
             if status == "succeeded":
                 return task
@@ -497,23 +553,30 @@ def _submit_and_wait(  # noqa: PLR0913
     *,
     base_url: str,
     api_key: str,
+    endpoints: _Endpoints,
     payload: dict[str, Any],
     output: str | None,
     timeout: int,
     prefix: str,
 ) -> None:
     """提交任务并挂起等待, 成功后下载视频并保存到本地."""
-    task_id = _create_task(base_url=base_url, api_key=api_key, payload=payload)
+    task_id = _create_task(
+        base_url=base_url,
+        api_key=api_key,
+        endpoints=endpoints,
+        payload=payload,
+    )
     typer.echo(f"任务已提交: task_id={task_id}")
     try:
         task = _wait_task(
             base_url=base_url,
             api_key=api_key,
+            endpoints=endpoints,
             task_id=task_id,
             timeout=timeout,
         )
     except Exception:
-        logger.exception("Video generation failed: task_id=%r", task_id)
+        logger.exception("Task failed: task_id=%r", task_id)
         raise typer.Exit(code=1) from None
     content: Any = task.get("content")
     url: str | None = content.get("url") if content else None
@@ -557,19 +620,21 @@ def _build_media_content(
     }
 
 
-def _submit(
+def _submit(  # noqa: PLR0913
     *,
     payload: dict[str, Any],
     output: str | None,
     timeout: int,
     base_url: str,
     prefix: str,
+    endpoints: _Endpoints = _GENERATION_ENDPOINTS,
 ) -> None:
     """校验密钥后提交任务并等待完成."""
     api_key = _validate_api_key()
     _submit_and_wait(
         base_url=base_url,
         api_key=api_key,
+        endpoints=endpoints,
         payload=payload,
         output=output,
         timeout=timeout,
@@ -582,7 +647,7 @@ def _submit(
 # ======================================================================================
 app = typer.Typer(
     name="ucloud",
-    help="视频生成(优云智算 MiniMax H3).",
+    help="视频生成/超分(优云智算 MiniMax H3 / Flash VSR).",
     no_args_is_help=True,
 )
 
@@ -769,4 +834,33 @@ def r2v(  # noqa: PLR0913
         timeout=timeout,
         base_url=base_url,
         prefix="pymzckcli_r2v_",
+    )
+
+
+@app.command()
+def upscale(
+    *,
+    video: UpscaleVideoField,
+    resolution: UpscaleResolutionField = _DEFAULT_UPSCALING_RESOLUTION,
+    output: OutputField = None,
+    timeout: TimeoutField = _DEFAULT_TIMEOUT,
+    base_url: BaseUrlField = _DEFAULT_BASE_URL,
+) -> None:
+    """视频超分(Flash VSR): 将已有视频提升到目标分辨率档位."""
+    payload: dict[str, Any] = {
+        "model": _UPSCALING_MODEL,
+        "video_url": _resolve_media_url(
+            value=video,
+            mime_types=_UPSCALING_VIDEO_MIME_TYPES,
+            max_size=_MAX_UPSCALING_VIDEO_SIZE,
+        ),
+        "resolution": resolution,
+    }
+    _submit(
+        payload=payload,
+        output=output,
+        timeout=timeout,
+        base_url=base_url,
+        prefix="pymzckcli_upscale_",
+        endpoints=_UPSCALING_ENDPOINTS,
     )
