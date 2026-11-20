@@ -131,14 +131,16 @@ I2vPromptField = Annotated[
     ),
 ]
 FirstFrameField = Annotated[
-    str,
+    str | None,
     typer.Option(
         help="首帧图片, 支持公网 URL 或本地文件路径(本地文件自动转为 Data URL)."
     ),
 ]
 LastFrameField = Annotated[
     str | None,
-    typer.Option(help="尾帧图片, 支持公网 URL 或本地文件路径."),
+    typer.Option(
+        help="尾帧图片, 支持公网 URL 或本地文件路径(本地文件自动转为 Data URL)."
+    ),
 ]
 ImageField = Annotated[
     list[str],
@@ -696,7 +698,7 @@ def t2v(  # noqa: PLR0913
 @app.command()
 def i2v(  # noqa: PLR0913
     *,
-    first_frame: FirstFrameField,
+    first_frame: FirstFrameField = None,
     last_frame: LastFrameField = None,
     prompt: I2vPromptField = "",
     prompt_type: PromptTypeField = _DEFAULT_PROMPT_TYPE,
@@ -711,30 +713,26 @@ def i2v(  # noqa: PLR0913
     aigc_watermark: AigcWatermarkField = False,
     base_url: BaseUrlField = _DEFAULT_BASE_URL,
 ) -> None:
-    """首尾帧生视频: 基于首帧(可选尾帧)图片生成视频."""
+    """首尾帧生视频: 可只传首帧、只传尾帧或同时传入, 至少提供一帧."""
+    if first_frame is None and last_frame is None:
+        errmsg = "--first-frame 和 --last-frame 至少提供一项"
+        raise typer.BadParameter(errmsg)
+
     content: list[dict[str, Any]] = []
     text = _resolve_prompt_or_empty(prompt=prompt, prompt_type=prompt_type)
     if text:
         content.append(_build_text_content(prompt=text))
-    content.append(
-        _build_image_content(
-            url=_resolve_media_url(
-                value=first_frame,
-                mime_types=_IMAGE_MIME_TYPES,
-                max_size=_MAX_IMAGE_SIZE,
-            ),
-            role="first_frame",
-        )
-    )
-    if last_frame is not None:
+    for role, frame in (("first_frame", first_frame), ("last_frame", last_frame)):
+        if frame is None:
+            continue
         content.append(
             _build_image_content(
                 url=_resolve_media_url(
-                    value=last_frame,
+                    value=frame,
                     mime_types=_IMAGE_MIME_TYPES,
                     max_size=_MAX_IMAGE_SIZE,
                 ),
-                role="last_frame",
+                role=role,
             )
         )
 
