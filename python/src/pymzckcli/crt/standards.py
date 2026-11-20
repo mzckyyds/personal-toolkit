@@ -1,8 +1,4 @@
-"""NTSC/PAL 模拟电视制式常量与复合信号波形定义.
-
-所有时间单位为秒, 电平以消隐电平为 0, 白电平为 1 归一化, 同步头为负值.
-采样率取 4 倍色副载波 (4fsc), 这是数字解码 NTSC/PAL 的经典采样方式.
-"""
+"""NTSC/PAL 制式参数与同步波形."""
 
 from __future__ import annotations
 
@@ -127,12 +123,7 @@ def _block_widths(std: Standard) -> tuple[float, float, float]:
 
 
 def line_kind(std: Standard, line_index: int) -> tuple[str, int]:
-    """判定某整行在帧内的类型与有效行号.
-
-    返回 (kind, row): kind ∈ {"pre_eq","serr","post_eq","blank","active"},
-    row 为有效行在场内的序号 (仅 active 有意义).
-    场边界位于半行精度 (field_lines 含 .5), 由此自然产生隔行.
-    """
+    """返回行类型和场内有效行号, 非有效行的行号为 -1."""
     fl = std.field_lines
     field = int((line_index + 0.5) // fl)
     rel = line_index - field * fl  # 相对场起始的行位置 (边界行可能为 -0.5)

@@ -1,4 +1,4 @@
-"""渲染管线: 串联 发射 -> 信道 -> 接收 -> CRT 显示, 逐场仿真并用 FFmpeg 编码 MP4."""
+"""CRT 信号恢复仿真与 MP4 渲染管线."""
 
 from __future__ import annotations
 

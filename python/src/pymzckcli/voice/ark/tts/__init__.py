@@ -1,4 +1,4 @@
-"""火山引擎单向流式语音合成命令行工具(基于 WebSocket).
+"""火山引擎单向流式语音合成工具(基于 WebSocket).
 
 密钥优先使用环境变量 ARK_TTS_API_KEY, 其次使用 ARK_API_KEY.
 

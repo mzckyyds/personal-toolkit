@@ -1,4 +1,4 @@
-"""OpenAI Images API 兼容的图片生成/编辑命令行工具.
+"""OpenAI Images API 兼容的图片生成/编辑工具.
 
 密钥使用环境变量 OPENAI_API_KEY.
 """
@@ -316,7 +316,7 @@ def _save_image(
 # ======================================================================================
 app = typer.Typer(
     name="openai",
-    help="图片生成/编辑(OpenAI Images API Compatible).",
+    help="OpenAI Images API 兼容的图片生成/编辑工具",
     no_args_is_help=True,
 )
 

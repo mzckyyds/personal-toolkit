@@ -1,4 +1,6 @@
-from __future__ import annotations  # noqa: D100
+"""命令行入口."""
+
+from __future__ import annotations
 
 from pathlib import Path
 from typing import Annotated
@@ -77,7 +79,7 @@ RoundsField = Annotated[
 # ======================================================================================
 app = typer.Typer(
     name="simulation",
-    help="虚拟世界模拟",
+    help="虚拟世界模拟工具",
     no_args_is_help=True,
 )
 

@@ -1,4 +1,4 @@
-"""优云智算视频生成(MiniMax H3)与超分(Flash VSR)命令行工具.
+"""优云智算视频生成(MiniMax H3)与超分(Flash VSR)工具.
 
 密钥使用环境变量 UCLOUD_API_KEY.
 
@@ -649,7 +649,7 @@ def _submit(  # noqa: PLR0913
 # ======================================================================================
 app = typer.Typer(
     name="ucloud",
-    help="视频生成/超分(优云智算 MiniMax H3 / Flash VSR).",
+    help="优云智算视频生成(MiniMax H3)与超分(Flash VSR)工具",
     no_args_is_help=True,
 )
 

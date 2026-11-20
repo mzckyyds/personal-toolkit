@@ -1,10 +1,4 @@
-"""CRT 雪花屏信号恢复生成器 CLI: image / video 两个子命令.
-
-图片与视频输入的参数差异较大, 故拆分:
-  image  必须指定 --duration (静态图恢复与保持的总时长), --fps 指定输出帧率.
-  video  用 --intro 指定片头恢复跨度, 时长/帧率自动=输入, 播完即止.
---width/--height 缺省时沿用输入尺寸.
-"""
+"""命令行入口."""
 
 from __future__ import annotations
 
@@ -22,7 +16,7 @@ __all__ = [
 
 app = typer.Typer(
     name="crt",
-    help="CRT 雪花屏信号恢复 (NTSC/PAL 模拟电视仿真)",
+    help="CRT 雪花屏信号恢复仿真工具",
     no_args_is_help=True,
 )
 
@@ -110,7 +104,7 @@ def image(  # noqa: PLR0913
     preset: PresetOption = "slow",
     audio: AudioOption = True,
 ) -> None:
-    """图片输入: 生成从雪花恢复为清晰图片并保持的视频 (需 --duration)."""
+    """生成从雪花恢复到静态图片的视频."""
     if not is_image_path(source):
         errmsg = "image 命令仅接受图片输入, 视频请用 `crt video`."
         raise typer.BadParameter(errmsg)
@@ -148,7 +142,7 @@ def video(  # noqa: PLR0913
     preset: PresetOption = "slow",
     audio: AudioOption = True,
 ) -> None:
-    """视频输入: 片头雪花恢复后播放原片, 输入播完即停止 (时长/帧率自动)."""
+    """为视频片头添加雪花恢复效果, 保留原片时长和帧率."""
     if is_image_path(source):
         errmsg = "video 命令仅接受视频输入, 图片请用 `crt image`."
         raise typer.BadParameter(errmsg)

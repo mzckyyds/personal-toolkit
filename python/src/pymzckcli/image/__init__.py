@@ -1,4 +1,4 @@
-"""图片生成/编辑命令行工具."""
+"""图片生成/编辑工具."""
 
 import typer
 
@@ -11,7 +11,7 @@ __all__ = [
 
 app = typer.Typer(
     name="image",
-    help="图片生成/编辑",
+    help="图片生成/编辑工具",
     no_args_is_help=True,
 )
 

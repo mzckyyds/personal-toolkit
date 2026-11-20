@@ -1,4 +1,4 @@
-"""CRT 雪花屏信号恢复生成器 (NTSC/PAL 模拟电视仿真)."""
+"""CRT 雪花屏信号恢复仿真工具."""
 
 from .cli import app
 from .pipeline import RenderConfig, render

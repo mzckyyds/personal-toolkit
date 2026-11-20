@@ -1,4 +1,4 @@
-"""火山引擎单向流式语音识别命令行工具(基于 WebSocket).
+"""火山引擎单向流式语音识别工具(基于 WebSocket).
 
 密钥优先使用环境变量 ARK_ASR_API_KEY, 其次使用 ARK_API_KEY.
 

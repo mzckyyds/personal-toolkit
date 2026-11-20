@@ -1,4 +1,4 @@
-"""火山引擎语音识别/合成命令行工具.
+"""火山引擎语音识别/合成工具.
 
 密钥使用环境变量 ARK_API_KEY.
 """
@@ -15,7 +15,7 @@ __all__ = [
 
 app = typer.Typer(
     name="ark",
-    help="语音识别/合成(火山引擎)",
+    help="火山引擎语音识别/合成工具",
     no_args_is_help=True,
 )
 app.command(name="asr")(recognize)

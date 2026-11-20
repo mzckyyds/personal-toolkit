@@ -1,12 +1,4 @@
-"""CRT 显示器: 把解码场渲染成"老式电视屏幕"的画面.
-
-负责:
-* 把视频内容按偏转位置画到屏幕上 (撕裂=逐行水平偏移, 滚动=垂直偏移).
-* 荧光粉余辉 (phosphor persistence): 逐场衰减 + 激励, 产生余辉与闪烁.
-* 扫描线, 荫罩/孔栅, 辉光 (bloom), 玻璃曲面几何, 暗角, 细颗粒.
-
-雪花不是叠加的噪声图层, 而是接收机放大后的噪声被当作视频画到屏幕上.
-"""
+"""将解码后的场渲染为 CRT 屏幕画面."""
 
 # numpy 数组运算的类型存根返回 Any 形状, 以下两项 unknown 检查对纯数值数组代码不适用
 # pyright: reportUnknownVariableType=false, reportUnknownArgumentType=false

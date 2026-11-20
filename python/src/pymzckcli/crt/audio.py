@@ -1,8 +1,4 @@
-"""CRT 音频: 无信号雪花嘶声随信号锁定逐渐淡出, 叠加轻微行频啸叫.
-
-真实老式电视在无信号时扬声器发出响亮的白噪声嘶声; 信号锁定后嘶声消失.
-这里用逐输出帧记录的噪声电平驱动嘶声包络, 并叠加 ~15.7kHz 行输出变压器啸叫.
-"""
+"""CRT 雪花嘶声与行频啸叫的合成."""
 
 from __future__ import annotations
 
@@ -38,10 +34,7 @@ def generate_hiss(  # noqa: PLR0913
     whine: bool = True,
     input_audio: Path | None = None,
 ) -> Path:
-    """根据 (时间, 噪声电平) 序列生成嘶声音频 WAV, 返回路径.
-
-    levels 中噪声电平取自接收机 AGC 后的噪声标准差 (雪花时 ~1.3, 锁定时 ~0.04).
-    """
+    """根据接收机增益调整后的噪声电平序列合成嘶声, 返回 WAV 路径."""
     rng = np.random.default_rng(seed)
     n = round(duration * _SAMPLE_RATE)
     t = np.arange(n) / _SAMPLE_RATE

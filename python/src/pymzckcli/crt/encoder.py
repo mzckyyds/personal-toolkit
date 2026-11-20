@@ -1,8 +1,4 @@
-"""发射端: 把静态图像编码为连续的 NTSC/PAL 复合视频信号.
-
-复合信号 = 行/场同步 + 消隐 + 色同步突发 + 亮度 + 正交平衡调幅色度.
-采样率 4fsc, 副载波相位随全局采样索引连续累积 (保留 NTSC 4 场 / PAL 8 场序列).
-"""
+"""将图像帧编码为连续的 NTSC/PAL 复合视频信号."""
 
 # numpy 数组运算的类型存根返回 Any 形状, 以下两项 unknown 检查对纯数值数组代码不适用
 # pyright: reportUnknownVariableType=false, reportUnknownArgumentType=false
