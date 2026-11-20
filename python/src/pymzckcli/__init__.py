@@ -3,6 +3,7 @@
 import typer
 from dotenv import load_dotenv
 
+from .crt import app as crt_app
 from .image import app as image_app
 from .simulation import app as simulation_app
 from .video import app as video_app
@@ -20,6 +21,7 @@ app = typer.Typer(
 app.add_typer(voice_app)
 app.add_typer(image_app)
 app.add_typer(video_app)
+app.add_typer(crt_app)
 app.add_typer(simulation_app)
 
 
